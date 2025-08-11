@@ -1,20 +1,13 @@
 <script setup lang="ts">
-import { defineProps, nextTick, onMounted, ref, watch } from 'vue'
+import { defineProps, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useColumnsStore } from '@/store/columns'
 import { loadNoteBySlug, type NoteDoc, findSlugByName } from '@/lib/notes'
-import { md } from '@/lib/md'
-import { renderPreview } from '@/lib/md' // PREVIEW
+import { md, renderPreview } from '@/lib/md'
 import { getBacklinksFor } from '@/lib/graph'
 import type { NoteMeta } from '@/lib/notes'
-import LinkPreview from './LinkPreview.vue' // PREVIEW
-import { usePreviewCache } from '@/lib/previewCache'
+import LinkPreview from './LinkPreview.vue'
 
-const props = defineProps<{
-    slug: string
-    index: number
-    canClose?: boolean
-}>()
-
+const props = defineProps<{ slug: string; index: number; canClose?: boolean }>()
 const columns = useColumnsStore()
 
 const isLoading = ref(true)
@@ -23,10 +16,10 @@ const html = ref<string>('')
 const outgoing = ref<string[]>([])
 const backlinks = ref<NoteMeta[]>([])
 
-// PREVIEW state
 const isTouch = typeof window !== 'undefined'
     && (('ontouchstart' in window) || (navigator.maxTouchPoints ?? 0) > 0)
 
+// === PREVIEW state ===
 const previewVisible = ref(false)
 const previewHtml = ref('')
 const previewX = ref(0)
@@ -37,8 +30,11 @@ let hideTimer: number | null = null
 let lastMouseX = 0
 let lastMouseY = 0
 
-// ✅ модульный кэш, общий для всех колонок
-const previewCache = usePreviewCache()
+// общий модульный кэш превью
+const previewCache = new Map<string, string>()
+
+// контейнер колонки (он скроллится)
+const container = ref<HTMLElement | null>(null)
 
 async function fetchNote() {
     isLoading.value = true
@@ -49,6 +45,9 @@ async function fetchNote() {
         html.value = md.render(note.value.content, env)
         outgoing.value = env.outgoing
         backlinks.value = await getBacklinksFor(note.value.slug)
+        await nextTick()
+        restoreScroll()
+        prefetchLinkedPreviews()
     } else {
         html.value = ''
         outgoing.value = []
@@ -56,9 +55,7 @@ async function fetchNote() {
     isLoading.value = false
 }
 
-function close() {
-    columns.closeAt(props.index)
-}
+function close() { columns.closeAt(props.index); }
 
 function onContentClick(e: MouseEvent) {
     const a = (e.target as HTMLElement).closest('a.wikilink') as HTMLAnchorElement | null
@@ -72,14 +69,9 @@ function onContentClick(e: MouseEvent) {
     }
 }
 
-watch(() => props.slug, fetchNote, { immediate: true })
-onMounted(fetchNote)
-
-/* ================= PREVIEW: делегирование hover ================= */
-
+// -------- Preview handlers --------
 function positionPreviewWithinViewport(w: number, h: number) {
-    const margin = 8
-    const offset = 12
+    const margin = 8, offset = 12
     let x = lastMouseX + offset
     let y = lastMouseY + offset
     if (x + w > window.innerWidth - margin) x = lastMouseX - w - offset
@@ -91,7 +83,6 @@ function positionPreviewWithinViewport(w: number, h: number) {
 async function showPreviewFor(slug: string) {
     if (isTouch) return
     hoverSlug.value = slug
-    // задержка, чтоб не мигал при быстрых перемещениях
     if (showTimer) window.clearTimeout(showTimer)
     if (hideTimer) window.clearTimeout(hideTimer)
     showTimer = window.setTimeout(async () => {
@@ -104,7 +95,6 @@ async function showPreviewFor(slug: string) {
         previewHtml.value = html ?? ''
         previewVisible.value = !!html
         await nextTick()
-        // LinkPreview сам сообщит размеры через @resize → скорректируем позицию
     }, 180)
 }
 
@@ -116,7 +106,6 @@ function hidePreviewSoon() {
         hoverSlug.value = null
     }, 80)
 }
-
 function hidePreviewNow() {
     if (showTimer) { window.clearTimeout(showTimer); showTimer = null }
     if (hideTimer) { window.clearTimeout(hideTimer); hideTimer = null }
@@ -126,38 +115,67 @@ function hidePreviewNow() {
 
 function onMouseOver(e: MouseEvent) {
     const a = (e.target as HTMLElement).closest('a.wikilink') as HTMLAnchorElement | null
-    if (!a || a.dataset.missing === 'true') {
-        hidePreviewSoon()
-        return
-    }
+    if (!a || a.dataset.missing === 'true') { hidePreviewSoon(); return }
     const slug = a.dataset.slug!
-    if (hoverSlug.value !== slug) {
-        showPreviewFor(slug)
-    }
+    if (hoverSlug.value !== slug) showPreviewFor(slug)
 }
-
 function onMouseMove(e: MouseEvent) {
-    lastMouseX = e.clientX
-    lastMouseY = e.clientY
-    if (previewVisible.value) {
-        // позицию уточним после измерения, но можно подвинуть сразу
-        previewX.value = lastMouseX + 12
-        previewY.value = lastMouseY + 12
-    }
+    lastMouseX = e.clientX; lastMouseY = e.clientY
+    if (previewVisible.value) { previewX.value = lastMouseX + 12; previewY.value = lastMouseY + 12 }
 }
+function onMouseLeave() { hidePreviewSoon() }
+function onPreviewResize(size: { width: number; height: number }) { positionPreviewWithinViewport(size.width, size.height) }
 
-function onMouseLeave() {
+// -------- Scroll persist --------
+function onScroll() {
+    if (!container.value) return
+    columns.setScrollForSlug(props.slug, container.value.scrollTop)
     hidePreviewSoon()
 }
-
-function onPreviewResize(size: { width: number; height: number }) {
-    positionPreviewWithinViewport(size.width, size.height)
+function restoreScroll() {
+    if (!container.value) return
+    const s = columns.getScrollForSlug(props.slug) ?? 0
+    container.value.scrollTop = s
 }
+
+// -------- Esc to close preview --------
+function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape') hidePreviewNow() }
+
+// -------- Idle prefetch of linked previews --------
+function requestIdle(cb: () => void) {
+    const ric = window.requestIdleCallback || ((fn: any) => setTimeout(fn, 0))
+    ric(() => cb())
+}
+function prefetchLinkedPreviews() {
+    if (isTouch || !container.value) return
+    requestIdle(async () => {
+        const links = Array.from(container.value!.querySelectorAll<HTMLAnchorElement>('a.wikilink[data-missing="false"]'))
+        const slugs = [...new Set(links.map(a => a.dataset.slug!).filter(Boolean))]
+        for (const slug of slugs.slice(0, 8)) { // ограничим до 8 на колонку
+            if (previewCache.has(slug)) continue
+            const n = await loadNoteBySlug(slug)
+            if (n) previewCache.set(slug, renderPreview(n.content, 3))
+        }
+    })
+}
+
+watch(() => props.slug, fetchNote, { immediate: true })
+
+onMounted(() => {
+    document.addEventListener('keydown', onKeydown)
+    container.value?.addEventListener('scroll', onScroll, { passive: true })
+    restoreScroll()
+})
+onUnmounted(() => {
+    document.removeEventListener('keydown', onKeydown)
+    container.value?.removeEventListener('scroll', onScroll)
+})
 </script>
 
 <template>
     <section
         class="column"
+        ref="container"
         @click="onContentClick"
         @mouseover="onMouseOver"
         @mousemove="onMouseMove"
@@ -176,35 +194,23 @@ function onPreviewResize(size: { width: number; height: number }) {
             <p>Заметка с slug <code>{{ props.slug }}</code> не найдена.</p>
             <p>Проверьте, существует ли файл в <code>/notes</code> и корректный <code>frontmatter.title</code>.</p>
         </div>
-        <div v-else v-html="html"></div>
+        <div v-else>
+            <div v-html="html"></div>
 
-        <!-- ниже основного HTML заметки -->
-        <template v-if="backlinks.length">
-            <hr />
-            <section class="backlinks">
-                <div class="meta">Сюда ссылаются:</div>
-                <ul class="backlinks-list">
-                    <li v-for="m in backlinks" :key="m.slug">
-                        <a
-                            href="#"
-                            class="wikilink"
-                            :data-slug="m.slug"
-                            data-missing="false"
-                        >{{ m.title }}</a>
-                    </li>
-                </ul>
-            </section>
-        </template>
+            <template v-if="backlinks.length">
+                <hr />
+                <section class="backlinks">
+                    <div class="meta">Сюда ссылаются:</div>
+                    <ul class="backlinks-list">
+                        <li v-for="m in backlinks" :key="m.slug">
+                            <a href="#" class="wikilink" :data-slug="m.slug" data-missing="false">{{ m.title }}</a>
+                        </li>
+                    </ul>
+                </section>
+            </template>
+        </div>
 
-
-        <!-- PREVIEW popover -->
-        <LinkPreview
-            :visible="previewVisible"
-            :x="previewX"
-            :y="previewY"
-            :html="previewHtml"
-            @resize="onPreviewResize"
-        />
+        <LinkPreview :visible="previewVisible" :x="previewX" :y="previewY" :html="previewHtml" @resize="onPreviewResize" />
     </section>
 </template>
 
