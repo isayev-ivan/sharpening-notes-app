@@ -6,6 +6,8 @@ import { md, renderPreview } from '@/lib/md'
 import { getBacklinksFor } from '@/lib/graph'
 import type { NoteMeta } from '@/lib/notes'
 import LinkPreview from './LinkPreview.vue'
+import { runIdleQueue } from '@/lib/idle'
+
 
 const props = defineProps<{ slug: string; index: number; canClose?: boolean }>()
 const columns = useColumnsStore()
@@ -148,16 +150,20 @@ function requestIdle(cb: () => void) {
 }
 function prefetchLinkedPreviews() {
     if (isTouch || !container.value) return
-    requestIdle(async () => {
-        const links = Array.from(container.value!.querySelectorAll<HTMLAnchorElement>('a.wikilink[data-missing="false"]'))
-        const slugs = [...new Set(links.map(a => a.dataset.slug!).filter(Boolean))]
-        for (const slug of slugs.slice(0, 8)) { // ограничим до 8 на колонку
-            if (previewCache.has(slug)) continue
-            const n = await loadNoteBySlug(slug)
+    const links = Array.from(container.value!.querySelectorAll<HTMLAnchorElement>('a.wikilink[data-missing="false"]'))
+    const slugs = [...new Set(links.map(a => a.dataset.slug!).filter(Boolean))].slice(0, 8)
+    const queue = slugs.filter(s => !previewCache.has(s)).slice()
+
+    runIdleQueue(() => {
+        const slug = queue.shift()
+        if (!slug) return false
+        loadNoteBySlug(slug).then(n => {
             if (n) previewCache.set(slug, renderPreview(n.content, 3))
-        }
+        })
+        return queue.length > 0
     })
 }
+
 
 watch(() => props.slug, fetchNote, { immediate: true })
 
