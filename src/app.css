@@ -21,16 +21,6 @@ body {
 a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-.app-shell {
-    display: flex;
-    flex-direction: row;
-    height: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    gap: var(--gutter);
-    padding: 16px;
-}
-
 .column {
     width: var(--column-width);
     min-width: var(--column-width);
@@ -96,3 +86,22 @@ a.wikilink.is-missing {
     border-radius: 4px;
 }
 
+/* обёртка приложения — колонка: topbar + лента колонок */
+.app-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+/* раньше у .app-shell было height:100%; заменим на гибкую высоту */
+.app-shell {
+    display: flex;
+    flex-direction: row;
+    /* height: 100%;  ⛔ убираем */
+    flex: 1 1 auto;          /* ⬅️ пусть занимает оставшееся место */
+    min-height: 0;           /* ⬅️ чтобы корректно работать с overflow */
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: var(--gutter);
+    padding: 16px;
+}

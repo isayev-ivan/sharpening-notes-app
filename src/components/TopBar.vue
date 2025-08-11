@@ -1,0 +1,68 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useColumnsStore } from '@/store/columns'
+import { getManifest } from '@/lib/notes'
+import { routeLocationForSlugs } from '@/router'
+
+const router = useRouter()
+const columns = useColumnsStore()
+
+// Заголовок сайта из env или дефолт
+const siteTitle = (import.meta.env.VITE_SITE_TITLE as string) ?? 'Название сайта'
+
+// Слуг «корневой» заметки (home.md или первая по списку)
+const rootSlug = ref<string>('')
+
+onMounted(async () => {
+    const manifest = await getManifest()
+    const home = manifest.find(m => m.path.endsWith('/home.md'))
+    const initial = home ?? manifest[0]
+    rootSlug.value = initial ? initial.slug : ''
+})
+
+async function goHome() {
+    if (!rootSlug.value) return
+    columns.setColumns([rootSlug.value])
+    await router.push(routeLocationForSlugs([rootSlug.value]))
+}
+</script>
+
+<template>
+    <header class="topbar">
+        <button class="topbar-title" @click="goHome" :disabled="!rootSlug">
+            {{ siteTitle }}
+        </button>
+        <nav class="topbar-nav">
+            <button class="topbar-link" @click="goHome" :disabled="!rootSlug">
+                Об этих заметках
+            </button>
+        </nav>
+    </header>
+</template>
+
+<style>
+.topbar{
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--bg);
+}
+.topbar-title{
+    font: inherit; font-weight: 600; letter-spacing: 0.2px;
+    background: transparent; border: none; cursor: pointer; padding: 0;
+    color: var(--fg);
+}
+.topbar-title:disabled{ opacity: .5; cursor: default; }
+.topbar-title:focus-visible{ outline: 2px solid var(--link); outline-offset: 2px; border-radius: 4px; }
+
+.topbar-nav{ display: flex; gap: 16px; }
+.topbar-link{
+    font: inherit; background: transparent; border: none; cursor: pointer; padding: 0;
+    color: var(--link);
+}
+.topbar-link:disabled{ opacity: .5; cursor: default; }
+.topbar-link:hover{ text-decoration: underline; }
+.topbar-link:focus-visible{ outline: 2px solid var(--link); outline-offset: 2px; border-radius: 4px; }
+</style>
