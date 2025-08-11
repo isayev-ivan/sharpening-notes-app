@@ -1,9 +1,6 @@
 import { defineStore } from 'pinia'
 
-export type Column = {
-    slug: string
-    scrollTop: number
-}
+export type Column = { slug: string; scrollTop: number }
 
 export const useColumnsStore = defineStore('columns', {
     state: () => ({
@@ -31,7 +28,15 @@ export const useColumnsStore = defineStore('columns', {
         },
         setSlugAt(index: number, slug: string) {
             if (this.columns[index]) this.columns[index].slug = slug
+        },
+        // NEW: полная замена колонок по списку слугов
+        setColumns(slugs: string[]) {
+            this.columns = slugs.map(s => ({ slug: s, scrollTop: 0 }))
+        },
+    },
+    getters: {
+        slugs(state): string[] {
+            return state.columns.map(c => c.slug)
         }
     }
 })
-
