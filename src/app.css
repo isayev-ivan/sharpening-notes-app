@@ -76,3 +76,17 @@ a.wikilink.is-missing {
     color: var(--missing);
     text-decoration: underline dotted;
 }
+
+/* Backlinks */
+.backlinks .meta {
+    margin-bottom: 8px;
+}
+.backlinks-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.backlinks-list li {
+    margin: 6px 0;
+}
+

@@ -3,6 +3,8 @@ import { defineProps, onMounted, ref, watch } from 'vue'
 import { useColumnsStore } from '@/store/columns'
 import { loadNoteBySlug, type NoteDoc, findSlugByName } from '@/lib/notes'
 import { md } from '@/lib/md'
+import { getBacklinksFor } from '@/lib/graph'
+import type { NoteMeta } from '@/lib/notes'
 
 const props = defineProps<{
     slug: string
@@ -16,14 +18,18 @@ const isLoading = ref(true)
 const note = ref<NoteDoc | null>(null)
 const html = ref<string>('')
 const outgoing = ref<string[]>([])
+const backlinks = ref<NoteMeta[]>([])
 
 async function fetchNote() {
     isLoading.value = true
+    backlinks.value = []
     note.value = await loadNoteBySlug(props.slug)
     if (note.value) {
         const env: any = { resolve: findSlugByName, outgoing: [] as string[] }
         html.value = md.render(note.value.content, env)
         outgoing.value = env.outgoing
+        // Бэклинки
+        backlinks.value = await getBacklinksFor(note.value.slug)
     } else {
         html.value = ''
         outgoing.value = []
@@ -66,7 +72,25 @@ onMounted(fetchNote)
             <p>Заметка с slug <code>{{ props.slug }}</code> не найдена.</p>
             <p>Проверьте, существует ли файл в <code>/notes</code> и корректный <code>frontmatter.title</code>.</p>
         </div>
-        <div v-else v-html="html"></div>
+        <div v-else>
+            <div v-html="html"></div>
+
+            <!-- NEW: блок бэклинков -->
+            <template v-if="backlinks.length">
+                <hr />
+                <section class="backlinks">
+                    <div class="meta">Сюда ссылаются:</div>
+                    <ul class="backlinks-list">
+                        <li v-for="m in backlinks" :key="m.slug">
+                            <a href="#"
+                               class="wikilink"
+                               :data-slug="m.slug"
+                               data-missing="false">{{ m.title }}</a>
+                        </li>
+                    </ul>
+                </section>
+            </template>
+        </div>
     </section>
 </template>
 
