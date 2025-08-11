@@ -4,14 +4,11 @@ import { useRouter } from 'vue-router'
 import { useColumnsStore } from '@/store/columns'
 import { getManifest } from '@/lib/notes'
 import { routeLocationForSlugs } from '@/router'
+import ThemeToggle from './ThemeToggle.vue'   // ⬅️
 
 const router = useRouter()
 const columns = useColumnsStore()
-
-// Заголовок сайта из env или дефолт
 const siteTitle = (import.meta.env.VITE_SITE_TITLE as string) ?? 'Название сайта'
-
-// Слуг «корневой» заметки (home.md или первая по списку)
 const rootSlug = ref<string>('')
 
 onMounted(async () => {
@@ -30,13 +27,10 @@ async function goHome() {
 
 <template>
     <header class="topbar">
-        <button class="topbar-title" @click="goHome" :disabled="!rootSlug">
-            {{ siteTitle }}
-        </button>
+        <button class="topbar-title" @click="goHome" :disabled="!rootSlug">{{ siteTitle }}</button>
         <nav class="topbar-nav">
-            <button class="topbar-link" @click="goHome" :disabled="!rootSlug">
-                Об этих заметках
-            </button>
+            <button class="topbar-link" @click="goHome" :disabled="!rootSlug">Об этих заметках</button>
+            <ThemeToggle /> <!-- ⬅️ свитч -->
         </nav>
     </header>
 </template>
@@ -44,25 +38,24 @@ async function goHome() {
 <style>
 .topbar{
     position: sticky; top: 0; z-index: 50;
-    display: flex; align-items: baseline; justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between;
     padding: 10px 16px;
     border-bottom: 1px solid var(--rule);
     background: var(--bg);
 }
 .topbar-title{
-    font: inherit; font-weight: 600; letter-spacing: 0.2px;
+    font: inherit; font-weight: 600; letter-spacing: .2px;
     background: transparent; border: none; cursor: pointer; padding: 0;
     color: var(--fg);
 }
-.topbar-title:disabled{ opacity: .5; cursor: default; }
+.topbar-title:disabled{ opacity:.5; cursor: default; }
 .topbar-title:focus-visible{ outline: 2px solid var(--link); outline-offset: 2px; border-radius: 4px; }
-
-.topbar-nav{ display: flex; gap: 16px; }
+.topbar-nav{ display: flex; align-items: center; gap: 14px; }
 .topbar-link{
     font: inherit; background: transparent; border: none; cursor: pointer; padding: 0;
     color: var(--link);
 }
-.topbar-link:disabled{ opacity: .5; cursor: default; }
+.topbar-link:disabled{ opacity:.5; cursor: default; }
 .topbar-link:hover{ text-decoration: underline; }
 .topbar-link:focus-visible{ outline: 2px solid var(--link); outline-offset: 2px; border-radius: 4px; }
 </style>
