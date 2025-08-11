@@ -74,3 +74,8 @@ export async function loadNoteBySlug(slug: string): Promise<NoteDoc | null> {
         content: parsed.content,
     }
 }
+
+export function findSlugByName(name: string): string | null {
+    const s = toSlug(name)
+    return slugToPath.has(s) ? s : null
+}

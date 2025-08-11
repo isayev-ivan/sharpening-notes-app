@@ -17,6 +17,10 @@ export const useColumnsStore = defineStore('columns', {
             this.columns = this.columns.slice(0, index)
             this.columns.push({ slug, scrollTop: 0 })
         },
+        openToRightOf(index: number, slug: string) {
+            this.columns = this.columns.slice(0, index + 1)
+            this.columns.push({ slug, scrollTop: 0 })
+        },
         closeAt(index: number) {
             this.columns.splice(index, 1)
         },

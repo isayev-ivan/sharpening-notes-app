@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { defineProps, onMounted, ref, watch } from 'vue'
 import { useColumnsStore } from '@/store/columns'
-import { loadNoteBySlug, type NoteDoc } from '@/lib/notes'
+import { loadNoteBySlug, type NoteDoc, findSlugByName } from '@/lib/notes'
 import { md } from '@/lib/md'
 
 const props = defineProps<{
@@ -15,14 +15,18 @@ const columns = useColumnsStore()
 const isLoading = ref(true)
 const note = ref<NoteDoc | null>(null)
 const html = ref<string>('')
+const outgoing = ref<string[]>([])
 
 async function fetchNote() {
     isLoading.value = true
     note.value = await loadNoteBySlug(props.slug)
     if (note.value) {
-        html.value = md.render(note.value.content)
+        const env: any = { resolve: findSlugByName, outgoing: [] as string[] }
+        html.value = md.render(note.value.content, env)
+        outgoing.value = env.outgoing
     } else {
         html.value = ''
+        outgoing.value = []
     }
     isLoading.value = false
 }
@@ -31,16 +35,26 @@ function close() {
     columns.closeAt(props.index)
 }
 
+// делегирование клика по вики-ссылкам
+function onContentClick(e: MouseEvent) {
+    const a = (e.target as HTMLElement).closest('a.wikilink') as HTMLAnchorElement | null
+    if (!a) return
+    e.preventDefault()
+    const missing = a.dataset.missing === 'true'
+    const slug = a.dataset.slug
+    if (!missing && slug) {
+        columns.openToRightOf(props.index, slug)
+    }
+}
+
 watch(() => props.slug, fetchNote, { immediate: true })
 onMounted(fetchNote)
 </script>
 
 <template>
-    <section class="column">
+    <section class="column" @click="onContentClick">
         <header class="header">
-            <h1 class="note-title">
-                {{ note?.title ?? props.slug }}
-            </h1>
+            <h1 class="note-title">{{ note?.title ?? props.slug }}</h1>
             <div class="meta">
                 Колонка № {{ props.index + 1 }}
                 <button v-if="props.canClose" class="close-btn" @click="close" title="Закрыть">✕</button>

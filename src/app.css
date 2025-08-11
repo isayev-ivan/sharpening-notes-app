@@ -71,3 +71,8 @@ a:hover { text-decoration: underline; }
 }
 
 hr { border: 0; border-top: 1px solid var(--rule); margin: 24px 0; }
+
+a.wikilink.is-missing {
+    color: var(--missing);
+    text-decoration: underline dotted;
+}
