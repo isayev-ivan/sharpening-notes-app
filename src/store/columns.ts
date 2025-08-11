@@ -22,8 +22,12 @@ export const useColumnsStore = defineStore('columns', {
         },
         ensureAtLeastOne() {
             if (this.columns.length === 0) {
-                this.columns.push({ slug: 'home', scrollTop: 0 })
+                this.columns.push({ slug: 'home', scrollTop: 0 }) // временный плейсхолдер
             }
+        },
+        setSlugAt(index: number, slug: string) {
+            if (this.columns[index]) this.columns[index].slug = slug
         }
     }
 })
+

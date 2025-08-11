@@ -1,12 +1,19 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useColumnsStore } from '@/store/columns'
+import { getManifest } from '@/lib/notes'
 import Column from './Column.vue'
 
 const columns = useColumnsStore()
 
-onMounted(() => {
+onMounted(async () => {
     columns.ensureAtLeastOne()
+    const manifest = await getManifest()
+    const home = manifest.find(m => m.path.endsWith('/home.md'))
+    const initial = home ?? manifest[0]
+    if (initial) {
+        columns.setSlugAt(0, initial.slug)
+    }
 })
 </script>
 
