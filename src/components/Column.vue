@@ -129,16 +129,31 @@ function onMouseLeave() { hidePreviewSoon() }
 function onPreviewResize(size: { width: number; height: number }) { positionPreviewWithinViewport(size.width, size.height) }
 
 // -------- Scroll persist --------
+// запись скролла (как было)
 function onScroll() {
     if (!container.value) return
     columns.setScrollForSlug(props.slug, container.value.scrollTop)
     hidePreviewSoon()
 }
+
+// восстановление – несколько попыток
 function restoreScroll() {
     if (!container.value) return
-    const s = columns.getScrollForSlug(props.slug) ?? 0
-    container.value.scrollTop = s
+    const target = columns.getScrollForSlug(props.slug) ?? 0
+    let tries = 0
+    const apply = () => {
+        if (!container.value) return
+        container.value.scrollTop = target
+        // если не "прилипло" (контента ещё мало) — повторим до 6 кадров
+        if (tries < 6 && Math.abs(container.value.scrollTop - target) > 2) {
+            tries++
+            requestAnimationFrame(apply)
+        }
+    }
+    // подождём рендер
+    requestAnimationFrame(apply)
 }
+
 
 
 // -------- Esc to close preview --------

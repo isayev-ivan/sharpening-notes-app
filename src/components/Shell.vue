@@ -32,20 +32,25 @@ onMounted(async () => {
     const manifest = await getManifest()
     const valid = new Set(manifest.map(m => m.slug))
 
+    // 1) слуги из URL (если есть)
     let routeSlugs = slugsFromRoute(route).filter(s => valid.has(s))
+
+    // 2) если URL пустой — возьмём home или первую заметку
     if (routeSlugs.length === 0) {
         const home = manifest.find(m => m.path.endsWith('/home.md'))
         const initial = home ?? manifest[0]
         routeSlugs = initial ? [initial.slug] : []
     }
 
+    // 3) инициализируем store и приведём URL к каноническому виду
     columns.setColumns(routeSlugs)
 
     isSyncing = true
-    await router.replace(routeLocationForSlugs(columns.slugs))
+    if (!sameArray(slugsFromRoute(route), columns.slugs)) {
+        await router.replace(routeLocationForSlugs(columns.slugs))
+    }
     isSyncing = false
 
-    // если пришли по URL с несколькими колонками — показать последнюю
     await scrollToLastColumnSmooth()
 })
 
