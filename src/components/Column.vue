@@ -140,6 +140,7 @@ function restoreScroll() {
     container.value.scrollTop = s
 }
 
+
 // -------- Esc to close preview --------
 function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape') hidePreviewNow() }
 

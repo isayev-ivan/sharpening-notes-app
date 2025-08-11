@@ -69,7 +69,7 @@ watch(() => route.fullPath, async () => {
     <div class="app-shell">
         <Column
             v-for="(c, i) in columns.columns"
-            :key="i + ':' + c.slug"
+            :key="c.slug"
             :slug="c.slug"
             :index="i"
             :can-close="columns.columns.length > 1"
