@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { useColumnsStore } from '@/store/columns'
 import { getManifest } from '@/lib/notes'
 import { routeLocationForSlugs } from '@/router'
-import ThemeToggle from './ThemeToggle.vue'   // ⬅️
+import ThemeToggle from './ThemeToggle.vue'
 
 const router = useRouter()
 const columns = useColumnsStore()
@@ -13,15 +13,14 @@ const rootSlug = ref<string>('')
 
 onMounted(async () => {
     const manifest = await getManifest()
-    const home = manifest.find(m => m.path.endsWith('/home.md'))
-    const initial = home ?? manifest[0]
-    rootSlug.value = initial ? initial.slug : ''
+    const idx = manifest.find(m => m.path.endsWith('/index.md')) ?? manifest[0]
+    rootSlug.value = idx ? idx.slug : ''
 })
 
 async function goHome() {
     if (!rootSlug.value) return
     columns.setColumns([rootSlug.value])
-    await router.push(routeLocationForSlugs([rootSlug.value]))
+    await router.push(routeLocationForSlugs([rootSlug.value], rootSlug.value)) // 👈 на корень
 }
 </script>
 
@@ -30,10 +29,13 @@ async function goHome() {
         <button class="topbar-title" @click="goHome" :disabled="!rootSlug">{{ siteTitle }}</button>
         <nav class="topbar-nav">
             <button class="topbar-link" @click="goHome" :disabled="!rootSlug">Об этих заметках</button>
-            <ThemeToggle /> <!-- ⬅️ свитч -->
+            <ThemeToggle />
         </nav>
     </header>
 </template>
+
+
+<!-- стили оставляем как были -->
 
 <style>
 .topbar{
