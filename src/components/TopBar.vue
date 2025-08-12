@@ -6,7 +6,6 @@ import { getManifest } from '@/lib/notes'
 import { routeLocationForSlugs } from '@/router'
 import ThemeToggle from './ThemeToggle.vue'
 import { useUiStore } from '@/store/ui'
-
 const ui = useUiStore()
 const router = useRouter()
 const columns = useColumnsStore()
@@ -36,6 +35,7 @@ async function goHome() {
                     <path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" fill="none"/>
                 </svg>
             </button>
+            <button class="icon-btn" @click="ui.toggleHelp()" title="Подсказки (?)">?</button>
             <button class="topbar-link" @click="goHome" :disabled="!rootSlug">Об этих заметках</button>
             <ThemeToggle />
         </nav>

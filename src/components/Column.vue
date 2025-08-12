@@ -9,7 +9,8 @@ import LinkPreview from './LinkPreview.vue'
 import { runIdleQueue } from '@/lib/idle'
 
 
-const props = defineProps<{ slug: string; index: number; canClose?: boolean }>()
+const props = defineProps<{ slug: string; index: number; canClose?: boolean; active?: boolean }>()
+
 const columns = useColumnsStore()
 
 const isLoading = ref(true)
@@ -197,6 +198,7 @@ onUnmounted(() => {
 <template>
     <section
         class="column"
+        :class="{ active: props.active }"
         ref="container"
         @click="onContentClick"
         @mouseover="onMouseOver"
