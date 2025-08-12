@@ -19,14 +19,13 @@ export default function notesPlugin(): Plugin {
     // ✅ объявляем переменную в замыкании плагина
     let projectRoot: string = process.cwd()
 
-    let cached:
-        | {
+    let cached: | {
         manifest: { slug: string; title: string; path: string }[]
         outgoing: Record<string, string[]>
         incoming: Record<string, string[]>
         aliasMap: Record<string, string>
-    }
-        | null = null
+        aliasesBySlug: Record<string, string[]>         // 👈 NEW
+    } | null = null
 
     async function buildData() {
         if (cached) return cached
@@ -64,6 +63,7 @@ export default function notesPlugin(): Plugin {
         const manifest: { slug: string; title: string; path: string }[] = []
         const finalSlugs = new Set<string>()
         const aliasMap: Record<string, string> = {}
+        const aliasesBySlug: Record<string, string[]> = {}   // 👈 NEW
 
         for (const m of metasRaw) {
             const count = (slugCount.get(m.baseSlug) ?? 0) + 1
@@ -71,6 +71,7 @@ export default function notesPlugin(): Plugin {
             const slug = count === 1 ? m.baseSlug : `${m.baseSlug}-${count}`
             manifest.push({ slug, title: m.title, path: m.path })
             finalSlugs.add(slug)
+            aliasesBySlug[slug] = m.aliases.slice()              // 👈 NEW
 
             for (const a of m.aliases) {
                 const aslug = toSlug(a)
@@ -120,7 +121,7 @@ export default function notesPlugin(): Plugin {
         }
         for (const k of Object.keys(incoming)) incoming[k].sort()
 
-        cached = { manifest, outgoing, incoming, aliasMap }
+        cached = { manifest, outgoing, incoming, aliasMap, aliasesBySlug }
         return cached
     }
 
@@ -142,8 +143,8 @@ export default function notesPlugin(): Plugin {
                 return `export default ${JSON.stringify(manifest)}`
             }
             if (id === R_GRAPH) {
-                const { outgoing, incoming, aliasMap } = await buildData()
-                return `export default ${JSON.stringify({ outgoing, incoming, aliasMap })}`
+                const { outgoing, incoming, aliasMap, aliasesBySlug } = await buildData()
+                return `export default ${JSON.stringify({ outgoing, incoming, aliasMap, aliasesBySlug })}`
             }
             return null
         },

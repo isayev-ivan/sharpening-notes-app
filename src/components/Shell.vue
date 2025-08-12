@@ -5,6 +5,7 @@ import { useColumnsStore } from '@/store/columns'
 import { getManifest } from '@/lib/notes'
 import Column from './Column.vue'
 import TopBar from './TopBar.vue'
+import SearchOverlay from './SearchOverlay.vue'
 import { slugsFromRoute, routeLocationForSlugs } from '@/router'
 
 const columns = useColumnsStore()
@@ -104,6 +105,8 @@ watch(
                 :can-close="columns.columns.length > 1"
             />
         </div>
+
+        <SearchOverlay /> <!-- 👈 -->
     </div>
 </template>
 
