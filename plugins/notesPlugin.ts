@@ -1,10 +1,11 @@
+// plugins/notesPlugin.ts
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import fg from 'fast-glob'
 import matter from 'gray-matter'
 import MarkdownIt from 'markdown-it'
 import slugify from 'slugify'
-import type { Plugin } from 'vite'
+import type { Plugin, ResolvedConfig, HmrContext } from 'vite'
 
 const V_MANIFEST = 'virtual:notes-manifest'
 const V_GRAPH = 'virtual:notes-graph'
@@ -16,29 +17,33 @@ function toSlug(name: string) {
 }
 
 export default function notesPlugin(): Plugin {
-    // ✅ объявляем переменную в замыкании плагина
     let projectRoot: string = process.cwd()
+    let notesDirAbs: string = path.resolve(projectRoot, 'notes')
 
-    let cached: | {
-        manifest: { slug: string; title: string; path: string }[]
+    type ManifestItem = { slug: string; title: string; path: string }
+
+    let cached:
+        | {
+        manifest: ManifestItem[]
         outgoing: Record<string, string[]>
         incoming: Record<string, string[]>
         aliasMap: Record<string, string>
-        aliasesBySlug: Record<string, string[]>         // 👈 NEW
-    } | null = null
+        aliasesBySlug: Record<string, string[]>
+        excerptsBySlug: Record<string, string>
+    }
+        | null = null
 
     async function buildData() {
         if (cached) return cached
 
-        // ✅ используем projectRoot
-        const notesDir = path.resolve(projectRoot, 'notes')
-        const files = await fg('**/*.md', { cwd: notesDir, dot: false })
+        notesDirAbs = path.resolve(projectRoot, 'notes')
+        const files = await fg('**/*.md', { cwd: notesDirAbs, dot: false })
 
-        type Raw = { path: string; title: string; baseSlug: string; aliases: string[] }
-        const metasRaw: Raw[] = []
+        type RawMeta = { rel: string; title: string; aliases: string[]; baseSlug: string }
+        const metasRaw: RawMeta[] = []
 
         for (const rel of files) {
-            const abs = path.join(notesDir, rel)
+            const abs = path.join(notesDirAbs, rel)
             const raw = await fs.readFile(abs, 'utf8')
             const parsed = matter(raw)
             const fileName = path.basename(rel, '.md')
@@ -52,26 +57,32 @@ export default function notesPlugin(): Plugin {
                 : []
 
             metasRaw.push({
-                path: '/notes/' + rel.replace(/\\/g, '/'),
+                rel,
                 title,
-                baseSlug: toSlug(title || fileName),
                 aliases,
+                baseSlug: toSlug(title || fileName),
             })
         }
 
+        // финальные слаги (уникализируем дубликаты)
         const slugCount = new Map<string, number>()
-        const manifest: { slug: string; title: string; path: string }[] = []
+        const manifest: ManifestItem[] = []
         const finalSlugs = new Set<string>()
         const aliasMap: Record<string, string> = {}
-        const aliasesBySlug: Record<string, string[]> = {}   // 👈 NEW
+        const aliasesBySlug: Record<string, string[]> = {}
 
         for (const m of metasRaw) {
-            const count = (slugCount.get(m.baseSlug) ?? 0) + 1
-            slugCount.set(m.baseSlug, count)
-            const slug = count === 1 ? m.baseSlug : `${m.baseSlug}-${count}`
-            manifest.push({ slug, title: m.title, path: m.path })
+            const n = (slugCount.get(m.baseSlug) ?? 0) + 1
+            slugCount.set(m.baseSlug, n)
+            const slug = n === 1 ? m.baseSlug : `${m.baseSlug}-${n}`
+
+            manifest.push({
+                slug,
+                title: m.title,
+                path: '/notes/' + m.rel.replace(/\\/g, '/'),
+            })
             finalSlugs.add(slug)
-            aliasesBySlug[slug] = m.aliases.slice()              // 👈 NEW
+            aliasesBySlug[slug] = m.aliases.slice()
 
             for (const a of m.aliases) {
                 const aslug = toSlug(a)
@@ -79,16 +90,26 @@ export default function notesPlugin(): Plugin {
             }
         }
 
+        // markdown-it для построения outgoing и сниппетов
         const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
-        md.inline.ruler.before('emphasis', 'wikilinks-build', (state, silent) => {
-            const start = state.pos, max = state.posMax
-            if (state.src.charCodeAt(start) !== 0x5B || start + 1 >= max || state.src.charCodeAt(start + 1) !== 0x5B) return false
+
+        // inline-правило вики-ссылок [[Title]] или [[Title | label]]
+        const wikiLinksBuild = (state: any, silent: boolean) => {
+            const start = state.pos
+            const max = state.posMax
+            if (
+                state.src.charCodeAt(start) !== 0x5b || // [
+                start + 1 >= max ||
+                state.src.charCodeAt(start + 1) !== 0x5b // [
+            ) return false
+
             let pos = start + 2
             while (pos < max) {
-                if (state.src.charCodeAt(pos) === 0x5D && pos + 1 < max && state.src.charCodeAt(pos + 1) === 0x5D) break
+                if (state.src.charCodeAt(pos) === 0x5d && pos + 1 < max && state.src.charCodeAt(pos + 1) === 0x5d) break // ]]
                 pos++
             }
             if (pos >= max) return false
+
             if (!silent) {
                 const raw = state.src.slice(start + 2, pos).trim()
                 const pipe = raw.indexOf('|')
@@ -96,18 +117,36 @@ export default function notesPlugin(): Plugin {
                 let slug = toSlug(target)
                 if (aliasMap[slug]) slug = aliasMap[slug]
                 const env = state.env as any
-                if (finalSlugs.has(slug)) (env.outgoing ||= []).push(slug)
+                if (finalSlugs.has(slug)) {
+                    (env.outgoing ||= []).push(slug)
+                }
             }
+
             state.pos = pos + 2
             return true
-        })
+        }
+        md.inline.ruler.before('emphasis', 'wikilinks-build', wikiLinksBuild)
 
+        // сниппет: первые N абзацев, без markdown-изображений
+        function buildExcerpt(markdown: string, paras = 2): string {
+            const noMdImages = markdown.replace(/!\[[^\]]*]\([^)]*\)/g, '')
+            const blocks = noMdImages.trim().split(/\n\s*\n+/).slice(0, paras).join('\n\n')
+            return md.render(blocks)
+        }
+
+        // собираем outgoing и excerpts
         const outgoingMap = new Map<string, Set<string>>()
+        const excerptsBySlug: Record<string, string> = {}
+
         for (const m of manifest) {
-            // ✅ тоже на основе projectRoot
-            const abs = path.join(projectRoot, m.path.slice(1))
+            const abs = path.join(projectRoot, m.path.slice(1)) // '/notes/x.md' → '<root>/notes/x.md'
             const raw = await fs.readFile(abs, 'utf8')
             const parsed = matter(raw)
+
+            // excerpt
+            excerptsBySlug[m.slug] = buildExcerpt(parsed.content, 2)
+
+            // outgoing
             const env: any = { outgoing: [] as string[] }
             md.render(parsed.content, env)
             outgoingMap.set(m.slug, new Set(env.outgoing))
@@ -115,38 +154,59 @@ export default function notesPlugin(): Plugin {
 
         const outgoing: Record<string, string[]> = {}
         const incoming: Record<string, string[]> = {}
+
         for (const [src, set] of outgoingMap.entries()) {
             outgoing[src] = Array.from(set)
             for (const dst of set) (incoming[dst] ||= []).push(src)
         }
         for (const k of Object.keys(incoming)) incoming[k].sort()
 
-        cached = { manifest, outgoing, incoming, aliasMap, aliasesBySlug }
+        cached = { manifest, outgoing, incoming, aliasMap, aliasesBySlug, excerptsBySlug }
         return cached
+    }
+
+    // Удобная инвалидация в dev при изменении markdown-файлов
+    function maybeInvalidate(ctx: HmrContext) {
+        const file = ctx.file.replace(/\\/g, '/')
+        if (file.includes('/notes/') && file.endsWith('.md')) {
+            cached = null
+            // Инвалидируем виртуальные модули
+            const mod1 = ctx.server.moduleGraph.getModuleById(R_MANIFEST)
+            const mod2 = ctx.server.moduleGraph.getModuleById(R_GRAPH)
+            if (mod1) ctx.server.moduleGraph.invalidateModule(mod1)
+            if (mod2) ctx.server.moduleGraph.invalidateModule(mod2)
+        }
     }
 
     return {
         name: 'notes-plugin',
         enforce: 'pre',
-        configResolved(cfg) {
-            // ✅ сохраняем корень проекта из Vite
-            projectRoot = (cfg as any).root || process.cwd()
+
+        configResolved(cfg: ResolvedConfig) {
+            projectRoot = cfg.root || process.cwd()
+            notesDirAbs = path.resolve(projectRoot, 'notes')
         },
-        resolveId(id) {
+
+        resolveId(id: string) {
             if (id === V_MANIFEST) return R_MANIFEST
             if (id === V_GRAPH) return R_GRAPH
             return null
         },
-        async load(id) {
+
+        async load(id: string) {
             if (id === R_MANIFEST) {
                 const { manifest } = await buildData()
                 return `export default ${JSON.stringify(manifest)}`
             }
             if (id === R_GRAPH) {
-                const { outgoing, incoming, aliasMap, aliasesBySlug } = await buildData()
-                return `export default ${JSON.stringify({ outgoing, incoming, aliasMap, aliasesBySlug })}`
+                const { outgoing, incoming, aliasMap, aliasesBySlug, excerptsBySlug } = await buildData()
+                return `export default ${JSON.stringify({ outgoing, incoming, aliasMap, aliasesBySlug, excerptsBySlug })}`
             }
             return null
+        },
+
+        async handleHotUpdate(ctx) {
+            maybeInvalidate(ctx)
         },
     }
 }

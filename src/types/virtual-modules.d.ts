@@ -7,8 +7,9 @@ declare module 'virtual:notes-graph' {
     const data: {
         outgoing: Record<string, string[]>;
         incoming: Record<string, string[]>;
-        aliasMap: Record<string, string>; // 👈 добавили
-        aliasesBySlug: Record<string, string[]>; // 👈
+        aliasMap: Record<string, string>;
+        aliasesBySlug: Record<string, string[]>;
+        excerptsBySlug: Record<string, string>;
     };
     export default data;
 }

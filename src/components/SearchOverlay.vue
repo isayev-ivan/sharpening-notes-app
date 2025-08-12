@@ -1,3 +1,4 @@
+<!-- src/components/SearchOverlay.vue -->
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import manifest from 'virtual:notes-manifest'
@@ -7,6 +8,12 @@ import { useColumnsStore } from '@/store/columns'
 import { toSlug } from '@/lib/slug'
 
 type Row = { title: string; slug: string; aliases: string[] }
+type Scored = {
+    item: Row
+    score: number
+    hit: 'title' | 'slug' | 'alias' | null
+    matchText: string | null
+}
 
 const rows: Row[] = manifest.map(m => ({
     title: m.title,
@@ -24,25 +31,23 @@ const inputEl = ref<HTMLInputElement | null>(null)
 const qLower = computed(() => q.value.trim().toLowerCase())
 const qSlug  = computed(() => toSlug(q.value.trim()))
 
-type Scored = {
-    item: Row
-    score: number
-    hit: 'title' | 'slug' | 'alias' | null
-    matchText: string | null
+function escapeHtml(s: string) {
+    return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]!))
 }
-
-// простая подсветка: оборачиваем совпадение <mark>
+// Подсветка needle в text
 function highlight(text: string, needle: string) {
     if (!needle) return escapeHtml(text)
-    const i = text.toLowerCase().indexOf(needle.toLowerCase())
+    const lower = text.toLowerCase()
+    const i = lower.indexOf(needle.toLowerCase())
     if (i === -1) return escapeHtml(text)
     const a = escapeHtml(text.slice(0, i))
     const b = escapeHtml(text.slice(i, i + needle.length))
     const c = escapeHtml(text.slice(i + needle.length))
     return `${a}<mark>${b}</mark>${c}`
 }
-function escapeHtml(s: string) {
-    return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]!))
+// Сниппет (HTML) из предсборки
+function snippetFor(slug: string) {
+    return graph.excerptsBySlug?.[slug] ?? ''
 }
 
 const results = computed(() => {
@@ -54,17 +59,19 @@ const results = computed(() => {
         const title = item.title.toLowerCase()
         let score = 0; let hit: Scored['hit'] = null; let matchText: string | null = null
 
-        if (item.slug.startsWith(qs)) { score += 4; hit = 'slug'; matchText = qs }
-        else if (item.slug.includes(qs) && qs) { score += 2; hit = 'slug'; matchText = qs }
+        if (qs) {
+            if (item.slug.startsWith(qs)) { score += 4; hit = 'slug'; matchText = qs }
+            else if (item.slug.includes(qs)) { score += 2; hit = 'slug'; matchText = qs }
+        }
 
         if (title.startsWith(ql)) { score += 3; hit = 'title'; matchText = ql }
         else if (title.includes(ql)) { score += 2; hit = 'title'; matchText = ql }
 
-        // алиасы: берём лучший
+        // алиасы
         for (const a of item.aliases) {
             const al = a.toLowerCase()
             if (al.startsWith(ql)) { score += 2; hit = 'alias'; matchText = ql; break }
-            if (al.includes(ql))   { score += 1; hit = 'alias'; matchText = ql; }
+            if (al.includes(ql))   { score += 1; hit = 'alias'; matchText = ql }
         }
 
         return { item, score, hit, matchText }
@@ -100,6 +107,7 @@ function globalSlash(e: KeyboardEvent) {
 
 watch(() => ui.searchOpen, async (open) => {
     document.documentElement.classList.toggle('modal-open', open)
+    document.body.classList.toggle('modal-open', open)
     if (open) {
         await nextTick()
         inputEl.value?.focus()
@@ -122,12 +130,15 @@ onUnmounted(() => {
 <template>
     <transition name="overlay-fade">
         <div v-show="ui.searchOpen" class="search-overlay" role="dialog" aria-modal="true" aria-label="Поиск">
-            <!-- BACKDROP ниже по z-index -->
+            <!-- затемнение -->
             <div class="backdrop" @click="ui.closeSearch()" />
-            <!-- PANEL выше по z-index -->
+            <!-- панель -->
             <div class="search-panel">
                 <div class="search-row">
-                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" fill="none"/>
+                        <path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" fill="none"/>
+                    </svg>
                     <input
                         ref="inputEl"
                         class="search-input"
@@ -143,16 +154,21 @@ onUnmounted(() => {
                         <li
                             v-for="(r, i) in results"
                             :key="r.item.slug"
-                            class="result-item" :class="{ active: i === hi }"
+                            class="result-item"
+                            :class="{ active: i === hi }"
                             @mousedown.prevent="select(r)"
                         >
-                            <div class="primary" v-html="highlight(r.item.title, r.hit === 'title' ? (r.matchText||'') : '')"></div>
+                            <div class="primary" v-html="highlight(r.item.title, r.hit === 'title' ? (r.matchText || '') : '')"></div>
                             <div class="secondary">
-                <span v-if="r.hit==='alias'">
-                  aka <span v-html="highlight(r.item.aliases.find(a => a.toLowerCase().includes((r.matchText||''))) || '', r.matchText||'')"></span>
+                <span v-if="r.hit === 'alias'">
+                  aka
+                  <span
+                      v-html="highlight(r.item.aliases.find(a => a.toLowerCase().includes((r.matchText||''))) || '', r.matchText || '')"
+                  ></span>
                 </span>
-                                <span v-else v-html="highlight('/' + r.item.slug, r.hit==='slug' ? (r.matchText||'') : '')"></span>
+                                <span v-else v-html="highlight('/' + r.item.slug, r.hit === 'slug' ? (r.matchText || '') : '')"></span>
                             </div>
+                            <div class="snippet" v-html="snippetFor(r.item.slug)"></div>
                         </li>
                     </ul>
                 </transition>
@@ -162,7 +178,7 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* overlay container — flex: панель не растягивается на всю высоту */
+/* контейнер оверлея: flex — панель по контенту (на мобиле растянем) */
 .search-overlay{
     position: fixed; inset: 0; z-index: 2000;
     display: flex; align-items: flex-start; justify-content: center;
@@ -187,10 +203,10 @@ onUnmounted(() => {
     border: 1px solid var(--rule);
     border-radius: 12px;
     box-shadow: 0 24px 48px rgba(0,0,0,.25);
-    overflow: hidden; /* скролл только у списка результатов */
+    overflow: hidden; /* скролл — только у списка */
 }
 
-/* верхняя строка */
+/* строка поиска */
 .search-row{
     display: grid; grid-template-columns: 36px 1fr; align-items: center;
     padding: 12px 14px; gap: 6px; border-bottom: 1px solid var(--rule);
@@ -202,7 +218,7 @@ onUnmounted(() => {
     border: none; outline: none;
 }
 
-/* результаты — ограничиваем высоту, панель подстраивается под контент */
+/* результаты */
 .result-list{
     max-height: min(60vh, 520px);
     overflow: auto;
@@ -211,20 +227,32 @@ onUnmounted(() => {
 .result-item{ padding: 10px 14px; cursor: pointer; }
 .result-item .primary{ font-weight: 600; }
 .result-item .secondary{ color: var(--muted); font-size: 12px; margin-top: 2px; }
+.snippet{
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;         /* 2 строки */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.snippet p{ margin: 0 0 4px; }
 
 mark{ background: rgba(255, 230, 110, .7); color: inherit; padding: 0 1px; border-radius: 2px; }
+
 .result-item:hover, .result-item.active{ background: rgba(0,0,0,.05); }
 :root[data-theme="dark"] .result-item:hover,
 :root[data-theme="dark"] .result-item.active{ background: rgba(255,255,255,.06); }
 
-/* анимации как были */
+/* анимации */
 .overlay-fade-enter-active, .overlay-fade-leave-active{ transition: opacity .18s ease; }
 .overlay-fade-enter-from, .overlay-fade-leave-to{ opacity: 0; }
 .panel-slide-enter-active, .panel-slide-leave-active{ transition: transform .22s ease, opacity .22s ease; }
 .panel-slide-enter-from{ transform: translateY(-8px); opacity: 0; }
 .panel-slide-leave-to{ transform: translateY(-8px); opacity: 0; }
 
-/* мобильные — полноэкранная панель */
+/* мобильные — во весь экран */
 @media (max-width: 640px) {
     .search-panel{
         width: 100%; margin: 0; height: 100vh; border-radius: 0;
@@ -232,4 +260,3 @@ mark{ background: rgba(255, 230, 110, .7); color: inherit; padding: 0 1px; borde
     .result-list{ max-height: calc(100vh - 60px); }
 }
 </style>
-
