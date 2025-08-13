@@ -1,4 +1,3 @@
-// plugins/notesPlugin.ts
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import fg from 'fast-glob'
@@ -12,6 +11,7 @@ const V_GRAPH = 'virtual:notes-graph'
 const R_MANIFEST = '\0' + V_MANIFEST
 const R_GRAPH = '\0' + V_GRAPH
 
+// Нормализация → slug (локаль ru для кириллицы)
 function toSlug(name: string) {
     return slugify(name, { lower: true, strict: true, locale: 'ru' })
 }
@@ -39,42 +39,66 @@ export default function notesPlugin(): Plugin {
         notesDirAbs = path.resolve(projectRoot, 'notes')
         const files = await fg('**/*.md', { cwd: notesDirAbs, dot: false })
 
-        type RawMeta = { rel: string; title: string; aliases: string[]; baseSlug: string }
+        type RawMeta = {
+            rel: string
+            title: string
+            aliases: string[]
+            fileBase: string
+            desiredSlug?: string | null
+        }
         const metasRaw: RawMeta[] = []
 
+        // 1) Собираем метаданные
         for (const rel of files) {
             const abs = path.join(notesDirAbs, rel)
             const raw = await fs.readFile(abs, 'utf8')
             const parsed = matter(raw)
-            const fileName = path.basename(rel, '.md')
+
+            const fileBase = path.basename(rel, '.md') // может быть кириллицей
+            const fm = parsed.data ?? {}
+
             const title =
-                typeof parsed.data?.title === 'string' && parsed.data.title.trim()
-                    ? parsed.data.title.trim()
-                    : fileName
+                typeof fm.title === 'string' && fm.title.trim()
+                    ? fm.title.trim()
+                    : fileBase
 
-            const aliases: string[] = Array.isArray(parsed.data?.aliases)
-                ? parsed.data.aliases.map((s: any) => String(s).trim()).filter(Boolean)
-                : []
+            // aliases: строка | массив строк
+            const aliases: string[] = Array.isArray(fm.aliases)
+                ? fm.aliases.map((s: any) => String(s).trim()).filter(Boolean)
+                : typeof fm.aliases === 'string'
+                    ? [fm.aliases.trim()].filter(Boolean)
+                    : []
 
-            metasRaw.push({
-                rel,
-                title,
-                aliases,
-                baseSlug: toSlug(title || fileName),
-            })
+            // желаемый URL-слизок: slug | url | permalink
+            const desiredSlugRaw =
+                (typeof fm.slug === 'string' && fm.slug) ||
+                (typeof fm.url === 'string' && fm.url) ||
+                (typeof fm.permalink === 'string' && fm.permalink) ||
+                null
+            const desiredSlug = desiredSlugRaw ? toSlug(desiredSlugRaw) : null
+
+            metasRaw.push({ rel, title, aliases, fileBase, desiredSlug })
         }
 
-        // финальные слаги (уникализируем дубликаты)
-        const slugCount = new Map<string, number>()
+        // 2) Финальные slug'и (уникализация + alias map)
+        const used = new Map<string, number>()
         const manifest: ManifestItem[] = []
         const finalSlugs = new Set<string>()
+
         const aliasMap: Record<string, string> = {}
         const aliasesBySlug: Record<string, string[]> = {}
 
+        function ensureUnique(base: string): string {
+            const n = (used.get(base) ?? 0) + 1
+            used.set(base, n)
+            return n === 1 ? base : `${base}-${n}`
+        }
+
+        // предварительный проход — чтобы иметь доступ к каноническим slug'ам
         for (const m of metasRaw) {
-            const n = (slugCount.get(m.baseSlug) ?? 0) + 1
-            slugCount.set(m.baseSlug, n)
-            const slug = n === 1 ? m.baseSlug : `${m.baseSlug}-${n}`
+            const autoBase = toSlug(m.title || m.fileBase)
+            const base = m.desiredSlug ?? autoBase
+            const slug = ensureUnique(base)
 
             manifest.push({
                 slug,
@@ -84,16 +108,26 @@ export default function notesPlugin(): Plugin {
             finalSlugs.add(slug)
             aliasesBySlug[slug] = m.aliases.slice()
 
+            // Маппинги для вики-ссылок:
+            //  - алиасы → канонический slug
             for (const a of m.aliases) {
                 const aslug = toSlug(a)
                 if (aslug && aslug !== slug) aliasMap[aslug] = slug
             }
+            //  - сам заголовок → канонический slug (если override изменил slug)
+            const titleSlug = toSlug(m.title)
+            if (titleSlug && titleSlug !== slug) aliasMap[titleSlug] = slug
+            //  - имя файла → канонический slug (удобно, если ссылались по имени)
+            const fileSlug = toSlug(m.fileBase)
+            if (fileSlug && fileSlug !== slug) aliasMap[fileSlug] = slug
+            //  - если переопределили slug вручную, берём и его (на всякий)
+            if (m.desiredSlug && m.desiredSlug !== slug) aliasMap[m.desiredSlug] = slug
         }
 
-        // markdown-it для построения outgoing и сниппетов
+        // 3) markdown-it для outgoing и сниппетов
         const md = new MarkdownIt({ html: false, linkify: true, typographer: true })
 
-        // inline-правило вики-ссылок [[Title]] или [[Title | label]]
+        // inline-правило: собираем вики-ссылки [[Заголовок]] / [[Заголовок | текст]]
         const wikiLinksBuild = (state: any, silent: boolean) => {
             const start = state.pos
             const max = state.posMax
@@ -114,12 +148,10 @@ export default function notesPlugin(): Plugin {
                 const raw = state.src.slice(start + 2, pos).trim()
                 const pipe = raw.indexOf('|')
                 const target = (pipe !== -1 ? raw.slice(0, pipe) : raw).trim()
-                let slug = toSlug(target)
-                if (aliasMap[slug]) slug = aliasMap[slug]
+                let s = toSlug(target) // нормализуем кириллицу → slug
+                if (aliasMap[s]) s = aliasMap[s] // маппинг алиасов/заголовков/имён файлов → кан. slug
                 const env = state.env as any
-                if (finalSlugs.has(slug)) {
-                    (env.outgoing ||= []).push(slug)
-                }
+                if (finalSlugs.has(s)) (env.outgoing ||= []).push(s)
             }
 
             state.pos = pos + 2
@@ -134,7 +166,7 @@ export default function notesPlugin(): Plugin {
             return md.render(blocks)
         }
 
-        // собираем outgoing и excerpts
+        // 4) outgoing + excerpts
         const outgoingMap = new Map<string, Set<string>>()
         const excerptsBySlug: Record<string, string> = {}
 
@@ -165,12 +197,11 @@ export default function notesPlugin(): Plugin {
         return cached
     }
 
-    // Удобная инвалидация в dev при изменении markdown-файлов
+    // Инвалидация в dev при изменении markdown-файлов
     function maybeInvalidate(ctx: HmrContext) {
         const file = ctx.file.replace(/\\/g, '/')
         if (file.includes('/notes/') && file.endsWith('.md')) {
             cached = null
-            // Инвалидируем виртуальные модули
             const mod1 = ctx.server.moduleGraph.getModuleById(R_MANIFEST)
             const mod2 = ctx.server.moduleGraph.getModuleById(R_GRAPH)
             if (mod1) ctx.server.moduleGraph.invalidateModule(mod1)
