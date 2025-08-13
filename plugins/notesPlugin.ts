@@ -1,4 +1,3 @@
-// plugins/notesPlugin.ts
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import fg from 'fast-glob'
@@ -35,6 +34,7 @@ export default function notesPlugin(): Plugin {
         aliasesBySlug: Record<string, string[]>
         aliasToSlugs: Record<string, string[]>
         excerptsBySlug: Record<string, string>
+        descriptionsBySlug: Record<string, string>
         brokenLinks: { fromSlug: string; fromTitle: string; target: string; targetSlug: string }[]
         aliasConflicts: { alias: string; slugs: string[] }[]
     }
@@ -175,6 +175,7 @@ export default function notesPlugin(): Plugin {
         const outgoingMap = new Map<string, Set<string>>()
         const excerptsBySlug: Record<string, string> = {}
         const unresolvedBySlug: Record<string, { raw: string; targetSlug: string }[]> = {}
+        const descriptionsBySlug: Record<string, string> = {}
 
         for (const m of manifest) {
             const abs = path.join(projectRoot, m.path.slice(1))
@@ -182,6 +183,11 @@ export default function notesPlugin(): Plugin {
             const parsed = matter(raw)
 
             excerptsBySlug[m.slug] = buildExcerpt(parsed.content, 2)
+
+            const fmDesc = typeof parsed.data?.description === 'string'
+                ? String(parsed.data.description).trim()
+                : ''
+            if (fmDesc) descriptionsBySlug[m.slug] = fmDesc
 
             const env: any = { outgoing: [] as string[], unresolved: [] as any[] }
             md.render(parsed.content, env)
@@ -233,6 +239,7 @@ export default function notesPlugin(): Plugin {
             aliasesBySlug,
             aliasToSlugs,
             excerptsBySlug,
+            descriptionsBySlug,
             brokenLinks,
             aliasConflicts,
         }
@@ -299,8 +306,8 @@ export default function notesPlugin(): Plugin {
                 return `export default ${JSON.stringify(manifest)}`
             }
             if (id === R_GRAPH) {
-                const { outgoing, incoming, aliasMap, aliasesBySlug, aliasToSlugs, excerptsBySlug } = await buildData()
-                return `export default ${JSON.stringify({ outgoing, incoming, aliasMap, aliasesBySlug, aliasToSlugs, excerptsBySlug })}`
+                const { outgoing, incoming, aliasMap, aliasesBySlug, aliasToSlugs, excerptsBySlug, descriptionsBySlug } = await buildData()
+                return `export default ${JSON.stringify({ outgoing, incoming, aliasMap, aliasesBySlug, aliasToSlugs, excerptsBySlug, descriptionsBySlug })}`
             }
             if (id === R_CHECK) {
                 const { brokenLinks, aliasConflicts } = await buildData()

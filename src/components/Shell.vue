@@ -10,6 +10,7 @@ import SearchOverlay from './SearchOverlay.vue'
 import ShortcutsOverlay from './ShortcutsOverlay.vue'
 import { slugsFromRoute, routeLocationForSlugs } from '@/router'
 import { saveJSON, loadJSON } from '@/lib/storage'
+import { updateSEO } from '@/lib/seo'
 
 const columns = useColumnsStore()
 const ui = useUiStore()
@@ -104,6 +105,9 @@ onMounted(async () => {
         await scrollToLastColumnSmooth()
     }
 
+    // ⬇️ первичная установка SEO для активной заметки
+    updateSEO(columns.slugs[ui.activeIndex] ?? null, indexSlug.value)
+
     document.addEventListener('keydown', onGlobalKeydown)
 })
 
@@ -147,6 +151,16 @@ watch(
             await ensureColumnIntoView(ui.activeIndex)
         }
     }
+)
+
+/* ===== SEO: обновляем при смене активной или состава колонок ===== */
+watch(
+    () => [ui.activeIndex, columns.slugs] as const,
+    () => {
+        const activeSlug = columns.slugs[ui.activeIndex] ?? null
+        updateSEO(activeSlug, indexSlug.value)
+    },
+    { deep: false }
 )
 
 /* ===== Хоткеи ===== */

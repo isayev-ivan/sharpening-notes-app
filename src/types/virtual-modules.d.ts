@@ -11,6 +11,7 @@ declare module 'virtual:notes-graph' {
         aliasesBySlug: Record<string, string[]>;
         aliasToSlugs: Record<string, string[]>;
         excerptsBySlug: Record<string, string>;
+        descriptionsBySlug: Record<string, string>;
     };
     export default data;
 }
