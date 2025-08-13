@@ -9,6 +9,7 @@ import TopBar from './TopBar.vue'
 import SearchOverlay from './SearchOverlay.vue'
 import ShortcutsOverlay from './ShortcutsOverlay.vue'
 import { slugsFromRoute, routeLocationForSlugs } from '@/router'
+import { saveJSON, loadJSON } from '@/lib/storage'
 
 const columns = useColumnsStore()
 const ui = useUiStore()
@@ -17,7 +18,11 @@ const router = useRouter()
 const shellEl = ref<HTMLElement | null>(null)
 
 let isSyncing = false
+let restoringFromStorage = false            // ⬅️ флаг «восстанавливаем нач. состояние»
 const indexSlug = ref<string>('')
+
+const STORAGE_ACTIVE = 'activeSlug:v1'
+const STORAGE_HSCROLL = 'hscroll:v1'
 
 function sameArray(a: string[], b: string[]) {
     if (a.length !== b.length) return false
@@ -50,6 +55,16 @@ async function scrollToLastColumnSmooth() {
     el.scrollTo({ left: el.scrollWidth, behavior: 'smooth' })
 }
 
+/* ===== helpers: persist ===== */
+function saveActiveSlugByIndex(idx: number) {
+    const slug = columns.slugs[idx]
+    if (slug) saveJSON(STORAGE_ACTIVE, slug)
+}
+function saveHScrollLeft() {
+    const el = shellEl.value
+    if (el) saveJSON(STORAGE_HSCROLL, Math.round(el.scrollLeft))
+}
+
 /* ===== init ===== */
 onMounted(async () => {
     const manifest = await getManifest()
@@ -57,18 +72,37 @@ onMounted(async () => {
     const idx = manifest.find(m => m.path.endsWith('/index.md')) ?? manifest[0]
     indexSlug.value = idx ? idx.slug : ''
 
+    // слуги из URL
     let routeSlugs = slugsFromRoute(route).filter(s => valid.has(s))
     if (routeSlugs.length === 0 && indexSlug.value) routeSlugs = [indexSlug.value]
 
     columns.setColumns(routeSlugs)
-    ui.setActiveIndex(Math.max(0, routeSlugs.length - 1))
 
+    // восстановим активную колонку и горизонтальный скролл
+    const savedActive = loadJSON<string | null>(STORAGE_ACTIVE, null)
+    const savedH = loadJSON<number | null>(STORAGE_HSCROLL, null)
+
+    const savedIdx = savedActive ? routeSlugs.indexOf(savedActive) : -1
+    if (savedIdx >= 0) ui.setActiveIndex(savedIdx)
+    else ui.setActiveIndex(Math.max(0, routeSlugs.length - 1))
+
+    if (typeof savedH === 'number') restoringFromStorage = true
+
+    // синхронизация URL
     isSyncing = true
     const target = routeLocationForSlugs(columns.slugs, indexSlug.value)
     if (!sameArray(slugsFromRoute(route), columns.slugs)) await router.replace(target)
     isSyncing = false
 
-    await scrollToLastColumnSmooth()
+    // применим сохранённый горизонтальный скролл (если был)
+    if (typeof savedH === 'number') {
+        await nextTick()
+        const el = shellEl.value
+        if (el) el.scrollLeft = savedH
+        restoringFromStorage = false
+    } else {
+        await scrollToLastColumnSmooth()
+    }
 
     document.addEventListener('keydown', onGlobalKeydown)
 })
@@ -83,7 +117,7 @@ watch(
     async (slugs, prev) => {
         if (isSyncing) return
         const grew = slugs.length > ((prev && prev.length) ?? 0)
-        if (grew) ui.setActiveIndex(slugs.length - 1)
+        if (grew && !restoringFromStorage) ui.setActiveIndex(slugs.length - 1)
         else if (ui.activeIndex >= slugs.length) ui.setActiveIndex(Math.max(0, slugs.length - 1))
 
         isSyncing = true
@@ -91,7 +125,7 @@ watch(
         if (!sameArray(slugsFromRoute(route), slugs)) await router.push(target)
         isSyncing = false
 
-        await ensureColumnIntoView(ui.activeIndex)
+        if (!restoringFromStorage) await ensureColumnIntoView(ui.activeIndex)
     },
     { deep: false }
 )
@@ -106,7 +140,10 @@ watch(
         const fromUrl = slugsFromRoute(route).filter(s => valid.has(s))
         if (!sameArray(fromUrl, columns.slugs)) {
             columns.setColumns(fromUrl.length ? fromUrl : columns.slugs)
-            ui.setActiveIndex(Math.max(0, columns.slugs.length - 1))
+            // активную пытаемся восстановить по сохранённому slug
+            const savedActive = loadJSON<string | null>(STORAGE_ACTIVE, null)
+            const idx = savedActive ? columns.slugs.indexOf(savedActive) : -1
+            ui.setActiveIndex(idx >= 0 ? idx : Math.max(0, columns.slugs.length - 1))
             await ensureColumnIntoView(ui.activeIndex)
         }
     }
@@ -118,8 +155,7 @@ function isEditableTarget(ev: KeyboardEvent) {
     return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t as any).isContentEditable)
 }
 async function onGlobalKeydown(e: KeyboardEvent) {
-    if (e.defaultPrevented) return               // ⬅️ если кто-то уже обработал — выходим
-
+    if (e.defaultPrevented) return
     if (ui.searchOpen || ui.helpOpen || isEditableTarget(e)) return
 
     if (e.key === '?') { ui.toggleHelp(); e.preventDefault(); return }
@@ -127,22 +163,25 @@ async function onGlobalKeydown(e: KeyboardEvent) {
     if (e.key === 'ArrowLeft') {
         if (ui.activeIndex > 0) {
             ui.setActiveIndex(ui.activeIndex - 1)
+            saveActiveSlugByIndex(ui.activeIndex)          // ⬅️ сохраняем выбор
             await ensureColumnIntoView(ui.activeIndex)
         }
         e.preventDefault()
     } else if (e.key === 'ArrowRight') {
         if (ui.activeIndex < columns.slugs.length - 1) {
             ui.setActiveIndex(ui.activeIndex + 1)
+            saveActiveSlugByIndex(ui.activeIndex)
             await ensureColumnIntoView(ui.activeIndex)
         }
         e.preventDefault()
     } else if (e.key === 'Escape') {
-        // закрываем только если колонок больше одной
+        // не закрываем, если колонка единственная
         if (columns.slugs.length > 1) {
             const closeIdx = ui.activeIndex
             columns.closeAt(closeIdx)
             const newActive = Math.max(0, Math.min(closeIdx, columns.slugs.length - 1))
             ui.setActiveIndex(newActive)
+            saveActiveSlugByIndex(newActive)
             await nextTick()
             await ensureColumnIntoView(ui.activeIndex)
             e.preventDefault()
@@ -150,7 +189,7 @@ async function onGlobalKeydown(e: KeyboardEvent) {
     }
 }
 
-/* ===== Активная колонка по скроллу ===== */
+/* ===== Активная колонка по горизонтальному скроллу + сохранение скролла ===== */
 let scrollRAF = 0
 function onShellScroll() {
     if (scrollRAF) return
@@ -176,18 +215,21 @@ function updateActiveByVisibility() {
         const ratio = Math.max(0, inter) / c.offsetWidth
         const center = left + c.offsetWidth / 2
         const centered = center >= 0 && center <= vw
-        const score = ratio + (centered ? 1 : 0) // предпочитаем ту, чья середина в вьюпорте
+        const score = ratio + (centered ? 1 : 0)
         if (score > bestScore) { bestScore = score; bestIdx = i }
     }
 
-    const THRESH = 0.55 // «видна больше чем наполовину» или центр внутри
-    const centeredEnough = bestScore >= 1 /* центр внутри даёт +1 */
+    const THRESH = 0.55
+    const centeredEnough = bestScore >= 1
     if ((bestScore >= THRESH || centeredEnough) && bestIdx !== ui.activeIndex) {
         ui.setActiveIndex(bestIdx)
+        saveActiveSlugByIndex(bestIdx)  // ⬅️ сохраняем активную колонку
     }
+
+    saveHScrollLeft()                 // ⬅️ сохраняем горизонтальный скролл
 }
 
-/* ===== Клик по колонке делает её активной ===== */
+/* ===== Клик по колонке делает её активной и скроллит к ней ===== */
 async function onShellMouseDown(e: MouseEvent) {
     const el = shellEl.value
     if (!el) return
@@ -198,6 +240,7 @@ async function onShellMouseDown(e: MouseEvent) {
     const idx = cols.indexOf(colEl)
     if (idx >= 0 && idx !== ui.activeIndex) {
         ui.setActiveIndex(idx)
+        saveActiveSlugByIndex(idx)
         await ensureColumnIntoView(idx)
     }
 }
@@ -228,5 +271,5 @@ async function onShellMouseDown(e: MouseEvent) {
 </template>
 
 <style>
-/* стили — те же (активная колонка уже подсвечивается) */
+/* стили — без изменений; активная колонка уже подсвечивается */
 </style>
