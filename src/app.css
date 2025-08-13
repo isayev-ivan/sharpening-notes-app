@@ -70,10 +70,63 @@ a:hover { text-decoration: underline; }
 
 hr { border: 0; border-top: 1px solid var(--rule); margin: 24px 0; }
 
-a.wikilink.is-missing {
+.wikilink.is-missing {
     color: var(--missing);
     text-decoration: underline dotted;
 }
+.wikilink.is-ambiguous {
+    color: #cc7a00;                /* янтарный */
+    text-decoration: underline dashed;
+}
+/* Базовая подсветка — у тебя уже, оставим: */
+/* .wikilink.is-missing { color: var(--missing); } */
+/* .wikilink.is-ambiguous { color: #cc7a00; border-bottom: 1px dashed currentColor; } */
+
+/* Мини-тултип для двусмысленных ссылок */
+.wikilink.is-ambiguous{
+    position: relative; /* якорь для ::after/::before */
+}
+
+.wikilink.is-ambiguous:hover::after{
+    content: attr(data-amb-list);
+    position: absolute;
+    left: 0; bottom: 100%;
+    transform: translateY(-6px);
+    max-width: min(60ch, 320px);
+    white-space: pre-wrap;            /* переносим \n и длинные строки */
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 8px 10px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.18);
+    z-index: 40;
+    pointer-events: none;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.wikilink.is-ambiguous:hover::before{
+    content: '';
+    position: absolute;
+    left: 10px; bottom: calc(100% + 1px);
+    transform: translateY(-2px);
+    border: 6px solid transparent;
+    border-top-color: var(--bg);
+    filter: drop-shadow(0 -1px 0 var(--rule));
+    z-index: 41;
+}
+
+/* На узких экранах — центрируем, чтобы не обрезалось */
+@media (max-width: 640px) {
+    .wikilink.is-ambiguous:hover::after{
+        left: 50%; transform: translate(-50%, -6px);
+    }
+    .wikilink.is-ambiguous:hover::before{
+        left: 50%; transform: translate(-50%, -2px);
+    }
+}
+
 
 /* Backlinks */
 .backlinks .meta {

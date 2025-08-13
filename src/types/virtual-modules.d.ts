@@ -9,7 +9,16 @@ declare module 'virtual:notes-graph' {
         incoming: Record<string, string[]>;
         aliasMap: Record<string, string>;
         aliasesBySlug: Record<string, string[]>;
+        aliasToSlugs: Record<string, string[]>;
         excerptsBySlug: Record<string, string>;
+    };
+    export default data;
+}
+
+declare module 'virtual:notes-check' {
+    const data: {
+        brokenLinks: { fromSlug: string; fromTitle: string; target: string; targetSlug: string }[];
+        aliasConflicts: { alias: string; slugs: string[] }[];
     };
     export default data;
 }
