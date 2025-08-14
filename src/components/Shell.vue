@@ -263,7 +263,9 @@ async function onShellMouseDown(e: MouseEvent) {
 <template>
     <div class="app-root">
         <TopBar />
-        <div
+        <TransitionGroup
+            name="col"
+            tag="div"
             class="app-shell"
             ref="shellEl"
             @scroll.passive="onShellScroll"
@@ -277,7 +279,7 @@ async function onShellMouseDown(e: MouseEvent) {
                 :active="ui.activeIndex === i"
                 :can-close="columns.columns.length > 1"
             />
-        </div>
+        </TransitionGroup>
 
         <SearchOverlay />
         <ShortcutsOverlay />

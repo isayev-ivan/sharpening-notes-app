@@ -1,4 +1,6 @@
+/* Светлая (по умолчанию) */
 :root {
+    color-scheme: light;
     --bg: #ffffff;
     --fg: #111111;
     --muted: #666666;
@@ -7,6 +9,17 @@
     --missing: #d00;
     --column-width: 640px;
     --gutter: 24px;
+}
+
+/* Тёмная тема */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --fg: #e6e8ee;
+    --muted: #a0a4b3;
+    --rule: #272b38;
+    --link: #80a7ff;
+    --missing: #ff6b6b;
 }
 
 * { box-sizing: border-box; }
@@ -34,10 +47,8 @@ a:hover { text-decoration: underline; }
     padding: 0 16px 40px 16px;
 }
 .column { position: relative; }
-.column.active {
-    outline: 2px solid var(--link);
-    outline-offset: -2px;
-}
+
+.column.ready.active { outline: 2px solid var(--link); outline-offset: -2px; }
 
 .column:first-child { border-left: none; }
 
@@ -169,31 +180,47 @@ hr { border: 0; border-top: 1px solid var(--rule); margin: 24px 0; }
 
 /* ---- */
 
-/* Светлая (по умолчанию) */
-:root {
-    color-scheme: light;
-    --bg: #ffffff;
-    --fg: #111111;
-    --muted: #666666;
-    --rule: #e6e6e6;
-    --link: #0b57d0;
-    --missing: #d00;
-    --column-width: 640px;
-    --gutter: 24px;
-}
-
-/* Тёмная тема */
-:root[data-theme="dark"] {
-    color-scheme: dark;
-    --bg: #0f1117;
-    --fg: #e6e8ee;
-    --muted: #a0a4b3;
-    --rule: #272b38;
-    --link: #80a7ff;
-    --missing: #ff6b6b;
-}
-
 body {
     background: var(--bg);
     color: var(--fg);
 }
+
+
+/* Контейнер колонок — позиционируем, чтобы уходящая absolute оставалась на месте */
+.app-shell{
+    position: relative;
+    display: flex;
+    gap: var(--col-gap, 24px);
+    overflow-x: auto;
+    /* Иногда помогает от странных скачков браузерного «scroll anchoring» */
+    overflow-anchor: none;
+}
+
+/* === TransitionGroup "col" === */
+
+/* Вход (enter): мягко появиться сверху-вниз */
+.col-enter-from { opacity: 0; transform: translateY(8px); }
+.col-enter-to   { opacity: 1; transform: translateY(0); }
+.col-enter-active { transition: opacity .22s ease, transform .22s ease; }
+
+/* Выход (leave): не ломаем поток — вынимаем из flow на время анимации */
+.col-leave-from { opacity: 1; transform: translateY(0); }
+/* absolute = элемент остаётся в визуальном месте, пока соседи плавно сдвигаются */
+.col-leave-active {
+    position: absolute;
+    /* Чтобы элемент не схлопнулся: фиксируем высоту/ширину по текущим значениям.
+       Обычно колонка фиксированной ширины, но на всякий случай: */
+    width: var(--col-width, auto);
+    /* высоту браузер сохраняет автоматически по содержимому */
+    transition: opacity .18s ease, transform .18s ease;
+    z-index: 0;
+}
+.col-leave-to   { opacity: 0; transform: translateY(8px); }
+
+/* Движение соседних колонок: Vue применяет translate — мы его анимируем */
+.col-move { transition: transform .22s ease; }
+
+/* Немного производительности */
+.column { will-change: transform, opacity; }
+
+

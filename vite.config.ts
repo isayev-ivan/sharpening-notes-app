@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
         registerType: 'autoUpdate',
         // В dev-превью SW работает (npm run preview). Можно включить и в dev-сервере:
         // devOptions: { enabled: true, type: 'module' },
-        includeAssets: ['robots.txt', 'favicon.svg', 'favicon-32.png', 'favicon-16.png', 'apple-touch-icon.png', 'safari-pinned-tab.svg'],
+        includeAssets: ['favicon.svg', 'favicon-32.png', 'favicon-16.png', 'apple-touch-icon.png', 'safari-pinned-tab.svg'],
         manifest: {
           name: 'Evergreen Notes',
           short_name: 'Notes',

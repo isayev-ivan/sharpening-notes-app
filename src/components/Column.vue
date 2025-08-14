@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { ANIM } from '@/lib/anim'
+import { computed } from 'vue'
+import { useProgressiveReveal } from '@/composables/useProgressiveReveal'
+
 import { defineProps, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useColumnsStore } from '@/store/columns'
 import { loadNoteBySlug, type NoteDoc, findSlugByName } from '@/lib/notes'
@@ -10,6 +14,12 @@ import { runIdleQueue } from '@/lib/idle'
 
 
 const props = defineProps<{ slug: string; index: number; canClose?: boolean; active?: boolean }>()
+
+const { showLoader, contentVisible, begin, done, reset } = useProgressiveReveal()
+
+// ⬇️ «визуально активной»  считаем только загруженную
+const isReady = computed(() => contentVisible.value)
+const isActiveLoaded = computed(() => !!props.active && isReady.value)
 
 const columns = useColumnsStore()
 
@@ -40,22 +50,29 @@ const previewCache = new Map<string, string>()
 const container = ref<HTMLElement | null>(null)
 
 async function fetchNote() {
-    isLoading.value = true
-    backlinks.value = []
-    note.value = await loadNoteBySlug(props.slug)
-    if (note.value) {
-        const env: any = { resolve: findSlugByName, outgoing: [] as string[] }
-        html.value = md.render(note.value.content, env)
-        outgoing.value = env.outgoing
-        backlinks.value = await getBacklinksFor(note.value.slug)
-        await nextTick()
-        restoreScroll()
-        prefetchLinkedPreviews()
-    } else {
-        html.value = ''
-        outgoing.value = []
+    reset()
+    begin()               // ⬅️ запускаем цикл анимации ДО реальной загрузки
+
+    try {
+        isLoading.value = true
+        backlinks.value = []
+        note.value = await loadNoteBySlug(props.slug)
+        if (note.value) {
+            const env: any = { resolve: findSlugByName, outgoing: [] as string[] }
+            html.value = md.render(note.value.content, env)
+            outgoing.value = env.outgoing
+            backlinks.value = await getBacklinksFor(note.value.slug)
+            await nextTick()
+            restoreScroll()
+            prefetchLinkedPreviews()
+        } else {
+            html.value = ''
+            outgoing.value = []
+        }
+        isLoading.value = false
+    } finally {
+        done()              // ⬅️ сообщаем, что контент готов (управит лоадером)
     }
-    isLoading.value = false
 }
 
 function close() { columns.closeAt(props.index); }
@@ -198,39 +215,54 @@ onUnmounted(() => {
 <template>
     <section
         class="column"
-        :class="{ active: props.active }"
+        :class="{ ready: isReady, active: isActiveLoaded }"
+        :style="{ '--enter-delay': (props.index * ANIM.stagger) + 'ms' }"
         ref="container"
         @click="onContentClick"
         @mouseover="onMouseOver"
         @mousemove="onMouseMove"
         @mouseleave="onMouseLeave"
     >
-        <header class="header">
-            <h1 class="note-title">{{ note?.title ?? props.slug }}</h1>
-            <div class="meta">
-                Колонка № {{ props.index + 1 }}
-                <button v-if="props.canClose" class="close-btn" @click="close" title="Закрыть">✕</button>
+        <div class="column-inner" :class="{ 'is-entered': contentVisible }">
+            <!-- Лоадер: показывается только если не успели быстро загрузить -->
+            <div v-if="showLoader" class="column-loader" aria-live="polite">
+                <div class="spinner" aria-hidden="true"></div>
+                <div class="loader-text">Загрузка…</div>
             </div>
-        </header>
 
-        <div v-if="isLoading">Загрузка…</div>
-        <div v-else-if="!note">
-            <p>Заметка с slug <code>{{ props.slug }}</code> не найдена.</p>
-            <p>Проверьте, существует ли файл в <code>/notes</code> и корректный <code>frontmatter.title</code>.</p>
-        </div>
-        <div v-else>
-            <div v-html="html"></div>
+            <!-- Твой текущий контент колонки -->
+            <template v-if="contentVisible">
 
-            <template v-if="backlinks.length">
-                <hr />
-                <section class="backlinks">
-                    <div class="meta">Сюда ссылаются:</div>
-                    <ul class="backlinks-list">
-                        <li v-for="m in backlinks" :key="m.slug">
-                            <a href="#" class="wikilink" :data-slug="m.slug" data-missing="false">{{ m.title }}</a>
-                        </li>
-                    </ul>
-                </section>
+                <header class="header">
+                    <h1 class="note-title">{{ note?.title ?? props.slug }}</h1>
+                    <div class="meta">
+                        Колонка № {{ props.index + 1 }}
+                        <button v-if="props.canClose" class="close-btn" @click="close" title="Закрыть">✕</button>
+                    </div>
+                </header>
+
+                <!-- isLoading выпилить? -->
+                <div v-if="isLoading">Загрузка…</div>
+                <div v-else-if="!note">
+                    <p>Заметка с slug <code>{{ props.slug }}</code> не найдена.</p>
+                    <p>Проверьте, существует ли файл в <code>/notes</code> и корректный <code>frontmatter.title</code>.</p>
+                </div>
+                <div v-else>
+                    <div v-html="html"></div>
+
+                    <template v-if="backlinks.length">
+                        <hr />
+                        <section class="backlinks">
+                            <div class="meta">Сюда ссылаются:</div>
+                            <ul class="backlinks-list">
+                                <li v-for="m in backlinks" :key="m.slug">
+                                    <a href="#" class="wikilink" :data-slug="m.slug" data-missing="false">{{ m.title }}</a>
+                                </li>
+                            </ul>
+                        </section>
+                    </template>
+                </div>
+
             </template>
         </div>
 
@@ -239,5 +271,46 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* стили в app.css */
+
+.column-inner{
+    opacity: 0;
+    transform: translateY(8px);
+    transition:
+        opacity .22s ease,
+        transform .22s ease;
+    transition-delay: var(--enter-delay, 0ms);
+}
+
+.column-inner.is-entered{
+    opacity: 1;
+    transform: translateY(0);
+}
+
+/* Лоадер */
+.column-loader{
+    display: grid;
+    grid-auto-flow: column;
+    gap: 10px;
+    align-items: center;
+    justify-content: start;
+    padding: 12px 0;
+    color: var(--muted);
+    opacity: 0;
+    transform: translateY(6px);
+    animation: loader-in .16s ease forwards;
+}
+
+@keyframes loader-in{
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.spinner{
+    width: 16px; height: 16px; border-radius: 999px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: spin 750ms linear infinite;
+}
+@keyframes spin{ to { transform: rotate(360deg); } }
+
+
 </style>
