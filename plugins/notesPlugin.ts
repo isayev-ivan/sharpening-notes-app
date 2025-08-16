@@ -201,7 +201,10 @@ export default function notesPlugin(): Plugin {
             outgoing[src] = Array.from(set)
             for (const dst of set) (incoming[dst] ||= []).push(src)
         }
-        for (const k of Object.keys(incoming)) incoming[k].sort()
+        for (const k of Object.keys(incoming)) {
+            const arr = incoming[k]
+            if (arr) arr.sort()                 // ⬅️
+        }
 
         // ── 4) aliasToSlugs + конфликты (title + fileBase + aliases) ───────────
         const aliasToSlugs: Record<string, string[]> = {}

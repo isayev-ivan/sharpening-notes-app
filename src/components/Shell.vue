@@ -255,7 +255,7 @@ function updateActiveByVisibility() {
     let bestScore = -1
 
     for (let i = 0; i < cols.length; i++) {
-        const c = cols[i]
+        const c = cols[i]!
         const left = c.offsetLeft - sl
         const right = left + c.offsetWidth
         const inter = Math.min(right, vw) - Math.max(left, 0)

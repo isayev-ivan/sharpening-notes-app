@@ -22,4 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-/notes-check.json
+notes-check.json
+
+# TS incremental caches
+.tsbuild/
+*.tsbuildinfo

@@ -48,7 +48,7 @@ export function renderPreview(content: string, maxParagraphs = 3): string {
     let inPara = false
 
     for (let i = 0; i < tokens.length; i++) {
-        const t = tokens[i]
+        const t = tokens[i]!
 
         if (t.type === 'paragraph_open') {
             if (paragraphs >= maxParagraphs) break
