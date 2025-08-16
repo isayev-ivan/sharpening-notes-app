@@ -16,7 +16,15 @@ const columns = useColumnsStore()
 const ui = useUiStore()
 const route = useRoute()
 const router = useRouter()
-const shellEl = ref<HTMLElement | null>(null)
+const shellEl = ref<any>(null)
+
+/** Возвращает настоящий DOM-элемент контейнера колонок */
+function getShellEl(): HTMLElement | null {
+    const raw = shellEl.value
+    if (!raw) return null
+    // Если это уже HTMLElement — вернём его; если компонент — вернём $el
+    return raw instanceof HTMLElement ? raw : (raw.$el as HTMLElement | null)
+}
 
 let isSyncing = false
 let restoringFromStorage = false            // ⬅️ флаг «восстанавливаем нач. состояние»
@@ -34,7 +42,7 @@ function last<T>(arr: T[]): T | undefined { return arr.length ? arr[arr.length -
 
 async function ensureColumnIntoView(idx: number) {
     await nextTick()
-    const el = shellEl.value
+    const el = getShellEl()
     if (!el) return
     const cols = el.querySelectorAll<HTMLElement>('.column')
     const col = cols[idx]
@@ -51,7 +59,7 @@ async function ensureColumnIntoView(idx: number) {
 
 async function scrollToLastColumnSmooth() {
     await nextTick()
-    const el = shellEl.value
+    const el = getShellEl()
     if (!el) return
     el.scrollTo({ left: el.scrollWidth, behavior: 'smooth' })
 }
@@ -62,7 +70,7 @@ function saveActiveSlugByIndex(idx: number) {
     if (slug) saveJSON(STORAGE_ACTIVE, slug)
 }
 function saveHScrollLeft() {
-    const el = shellEl.value
+    const el = getShellEl()
     if (el) saveJSON(STORAGE_HSCROLL, Math.round(el.scrollLeft))
 }
 
@@ -98,7 +106,7 @@ onMounted(async () => {
     // применим сохранённый горизонтальный скролл (если был)
     if (typeof savedH === 'number') {
         await nextTick()
-        const el = shellEl.value
+        const el = getShellEl()
         if (el) el.scrollLeft = savedH
         restoringFromStorage = false
     } else {
@@ -211,13 +219,38 @@ function onShellScroll() {
 }
 function updateActiveByVisibility() {
     scrollRAF = 0
-    const el = shellEl.value
+    const el = getShellEl()
     if (!el) return
     const cols = Array.from(el.querySelectorAll<HTMLElement>('.column'))
     if (!cols.length) return
+
     const vw = el.clientWidth
     const sl = el.scrollLeft
+    const maxSL = Math.max(0, el.scrollWidth - el.clientWidth)
+    const EPS = 2 // допуск на субпиксели/инерцию
 
+    // ⬅️ Новый: если на левом/правом краю — жёстко фиксируем активную
+    if (maxSL > 0) {
+        if (sl <= EPS) {
+            if (ui.activeIndex !== 0) {
+                ui.setActiveIndex(0)
+                saveActiveSlugByIndex(0)
+            }
+            saveHScrollLeft()
+            return
+        }
+        if (sl >= maxSL - EPS) {
+            const lastIdx = cols.length - 1
+            if (ui.activeIndex !== lastIdx) {
+                ui.setActiveIndex(lastIdx)
+                saveActiveSlugByIndex(lastIdx)
+            }
+            saveHScrollLeft()
+            return
+        }
+    }
+
+    // Обычная эвристика «кто лучше виден/центрирован»
     let bestIdx = ui.activeIndex
     let bestScore = -1
 
@@ -237,15 +270,16 @@ function updateActiveByVisibility() {
     const centeredEnough = bestScore >= 1
     if ((bestScore >= THRESH || centeredEnough) && bestIdx !== ui.activeIndex) {
         ui.setActiveIndex(bestIdx)
-        saveActiveSlugByIndex(bestIdx)  // ⬅️ сохраняем активную колонку
+        saveActiveSlugByIndex(bestIdx)
     }
 
-    saveHScrollLeft()                 // ⬅️ сохраняем горизонтальный скролл
+    saveHScrollLeft()
 }
+
 
 /* ===== Клик по колонке делает её активной и скроллит к ней ===== */
 async function onShellMouseDown(e: MouseEvent) {
-    const el = shellEl.value
+    const el = getShellEl()
     if (!el) return
     const target = e.target as HTMLElement
     const colEl = target.closest('.column') as HTMLElement | null
